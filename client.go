@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,8 +31,7 @@ func tokenCacheFile(tokenFile string) (string, error) {
 	// necessary
 	os.MkdirAll(tokenCacheDir, 0700)
 	// return the credential file's path
-	return filepath.Join(tokenCacheDir,
-		url.QueryEscape(tokenFile)), err
+	return filepath.Join(tokenCacheDir, url.QueryEscape(tokenFile)), nil
 }
 
 // tokenFromFile retrieves a Token from a given file path.
@@ -41,6 +39,7 @@ func tokenCacheFile(tokenFile string) (string, error) {
 func tokenFromFile(file string) (*oauth2.Token, error) {
 	// open the file for reading. It returns a pointer to a File instance
 	f, err := os.Open(file)
+	defer f.Close()
 	if err != nil {
 		// if the file cannot be opened, return nil and the error so the receiving
 		// side can act accordingly
@@ -51,13 +50,16 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 	// NewDecoder returns a new decoder that reads from f.
 	// Decode reads the JSON-encoded value and stores it in t.
 	err = json.NewDecoder(f).Decode(t)
-	defer f.Close()
-	return t, err
+	if err != nil {
+		return nil, err
+	}
+
+	return t, nil
 }
 
 // getTokenFromWeb uses Config to request a Token.
 // It returns the retrieved Token.
-func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
+func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 	// returns a URL to OAuth 2.0 provider's consent page that asks for
 	// permissions for the required scopes explicitly.
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
@@ -67,58 +69,70 @@ func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
 	var code string
 	// scan the standard input to populate code
 	if _, err := fmt.Scan(&code); err != nil {
-		log.Fatalf("Unable to read authorization code %v", err)
+		return nil, err
 	}
 
 	// Exchange converts an authorization code into a token
 	tok, err := config.Exchange(oauth2.NoContext, code)
 	if err != nil {
-		log.Fatalf("Unable to retrieve token from web %v", err)
+		return nil, err
 	}
-	return tok
+	return tok, nil
 }
 
 // saveToken uses a file path to create a file and store the
 // token in it.
-func saveToken(file string, token *oauth2.Token) {
-	fmt.Printf("Saving credential file to: %s\n", file)
+func saveToken(file string, token *oauth2.Token) error {
 	f, err := os.Create(file)
-	if err != nil {
-		log.Fatalf("Unable to cache oauth token: %v", err)
-	}
 	defer f.Close()
+	if err != nil {
+		return err
+	}
+
 	// encode the token and save it
-	json.NewEncoder(f).Encode(token)
+	err = json.NewEncoder(f).Encode(token)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // getClient uses a Context and Config to retrieve a Token
 // then generate a Client. It returns the generated Client.
-func getClient(ctx context.Context, config *oauth2.Config, tokenFile string) *http.Client {
+func getClient(ctx context.Context, config *oauth2.Config, tokenFile string) (*http.Client, error) {
 	// get cache file's path
 	cacheFile, err := tokenCacheFile(tokenFile)
 	if err != nil {
-		log.Fatalf("Unable to get path to cached credential file. %v", err)
+		return nil, err
 	}
 	// reads the cached token, if it exists
 	tok, err := tokenFromFile(cacheFile)
-	// if there's no existing cached token, get one and save it
+	// get a fresh token from the web if there's no valid existing token
 	if err != nil {
-		tok = getTokenFromWeb(config)
-		saveToken(cacheFile, tok)
+		tok, err = getTokenFromWeb(config)
+		if err != nil {
+			return nil, err
+		}
+		err = saveToken(cacheFile, tok)
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	// Client returns an HTTP client using the provided token
-	return config.Client(ctx, tok)
+	return config.Client(ctx, tok), nil
 }
 
 // Create an HTTP client ready to invoke API calls
-func CreateClient(secretFile string, tokenFile string, scope string) *http.Client {
+func CreateClient(secretFile string, tokenFile string, scope string) (*http.Client, error) {
 	// create an empty context
 	ctx := context.Background()
 
 	// read the client secret json file which contains the client id and secret
 	b, err := ioutil.ReadFile(secretFile)
 	if err != nil {
-		log.Fatalf("Unable to read client secret file: %v", err)
+		return nil, err
 	}
 
 	// ConfigFromJSON uses a Google Developers Console client_credentials.json
@@ -126,11 +140,14 @@ func CreateClient(secretFile string, tokenFile string, scope string) *http.Clien
 	// instance
 	config, err := google.ConfigFromJSON(b, scope)
 	if err != nil {
-		log.Fatalf("Unable to parse client secret file to config: %v", err)
+		return nil, err
 	}
 
 	// get an HTTP client using the context and config/token
-	client := getClient(ctx, config, tokenFile)
+	client, err := getClient(ctx, config, tokenFile)
+	if err != nil {
+		return nil, err
+	}
 
-	return client
+	return client, nil
 }
