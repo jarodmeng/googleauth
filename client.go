@@ -13,6 +13,8 @@ import (
 	"os/user"
 	"path/filepath"
 
+	"github.com/pkg/browser"
+
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -47,11 +49,14 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 
 func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-	fmt.Printf("Go to the following link in your browser then type the "+
-		"authorization code: \n%v\n", authURL)
-
+	fmt.Println("Type the authorization code: ")
+	err := browser.OpenURL(authURL)
+	if err != nil {
+		fmt.Printf("Go to the following link in your browser then type the "+
+			"authorization code: \n%v\n", authURL)
+	}
 	var code string
-	if _, err := fmt.Scan(&code); err != nil {
+	if _, err = fmt.Scan(&code); err != nil {
 		return nil, err
 	}
 
