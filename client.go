@@ -104,18 +104,24 @@ func getClient(ctx context.Context, config *oauth2.Config, tokenFile string) (*h
 	return config.Client(ctx, tok), nil
 }
 
-// CreateClient uses a client ID and secret file, a token file and a scope
+// CreateClientFromFile uses a secret file, a token file and a scope
 // string to create an HTTP client. The HTTP client can be passed to New()
 // function of Google client libraries to create an API service instance.
-func CreateClient(secretFile string, tokenFile string, scope string) (*http.Client, error) {
-	ctx := context.Background()
-
+func CreateClientFromFile(secretFile string, tokenFile string, scope string) (*http.Client, error) {
 	b, err := ioutil.ReadFile(secretFile)
 	if err != nil {
 		return nil, err
 	}
 
-	config, err := google.ConfigFromJSON(b, scope)
+	return CreateClient(b, tokenFile, scope)
+}
+
+// CreateClient takes a byte secret, a token file name and a scope to create an
+// HTTP client.
+func CreateClient(secret []byte, tokenFile string, scope string) (*http.Client, error) {
+	ctx := context.Background()
+
+	config, err := google.ConfigFromJSON(secret, scope)
 	if err != nil {
 		return nil, err
 	}
